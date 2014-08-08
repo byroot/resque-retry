@@ -41,7 +41,7 @@ class RetryDefaultsJob
   @queue = :testing
 
   def self.perform(*args)
-    raise
+    raise 'error'
   end
 end
 
@@ -102,11 +102,27 @@ class InheritTestWithMoreExtraJob < InheritTestWithExtraJob
   end
 end
 
-class RetryWithModifiedArgsJob < RetryDefaultsJob
+class DeprecatedRetryWithModifiedArgsJob < RetryDefaultsJob
   @queue = :testing
 
   def self.args_for_retry(*args)
-    args.each { |arg| arg << 'bar' }
+    # NOTE: implementation is irrelevant we only care that it's invoked
+  end
+end
+
+class RetryWithModifiedArgsJob < RetryDefaultsJob
+  @queue = :testing
+
+  def self.retry_args(*args)
+    # NOTE: implementation is irrelevant we only care that it's invoked
+  end
+end
+
+class RetryWithExceptionBasedArgsJob < RetryDefaultsJob
+  @queue = :testing
+
+  def self.retry_args_for_exception(exception, *args)
+    # NOTE: implementation is irrelevant we only care that it's invoked
   end
 end
 

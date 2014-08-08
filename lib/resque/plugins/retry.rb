@@ -148,24 +148,33 @@ module Resque
       end
 
       # @abstract
-      # The number of seconds to set the TTL to on the resque-retry key in redis
-      # 
-      # @return [Number] number of seconds
-      #
-      # @api public
-      def expire_retry_key_after
-        @expire_retry_key_after
-      end
-
-      # @abstract
       # Modify the arguments used to retry the job. Use this to do something
       # other than try the exact same job again
       #
       # @return [Array] new job arguments
       #
       # @api public
-      def args_for_retry(*args)
-        args
+      def retry_args(*args)
+        # Here for backwards compatibility. If an "args_for_retry" method exists
+        # invoke it, but warn that it is deprecated (and will be removed in a
+        # future revision)
+        if respond_to?(:args_for_retry)
+          warn "`Resque::Plugins::Retry#args_for_retry` is deprecated, please use `Resque::Plugins::Retry#retry_args` instead."
+          args_for_retry(*args)
+        else
+          args
+        end
+      end
+
+      # @abstract
+      # Modify the arguments used to retry the job based on the exception.
+      # Use this to do something other than try the exact same job again.
+      #
+      # @return [Array] new job arguments
+      #
+      # @api public
+      def retry_args_for_exception(exception, *args)
+        retry_args(*args)
       end
 
       # Convenience method to test whether you may retry on a given
@@ -232,6 +241,14 @@ module Resque
           @retry_exceptions ||= nil
         end
       end
+
+      # @abstract
+      # The number of seconds to set the TTL to on the resque-retry key in redis
+      #
+      # @return [Number] number of seconds
+      #
+      # @api public
+      attr_reader :expire_retry_key_after
 
       # Test if the retry criteria is valid
       #
@@ -332,11 +349,13 @@ module Resque
         # jobs that fail before ::perform will be both retried and sent to the failed queue.
         Resque.redis.setnx(redis_retry_key(*args), -1)
 
+        retry_args = retry_args_for_exception(exception, *args)
+
         if temp_retry_delay <= 0
           # If the delay is 0, no point passing it through the scheduler
-          Resque.enqueue(retry_in_queue, *args_for_retry(*args))
+          Resque.enqueue(retry_in_queue, *retry_args)
         else
-          Resque.enqueue_in(temp_retry_delay, retry_in_queue, *args_for_retry(*args))
+          Resque.enqueue_in(temp_retry_delay, retry_in_queue, *retry_args)
         end
 
         # remove retry key from redis if we handed retry off to another queue.
@@ -348,7 +367,8 @@ module Resque
 
       # Resque before_perform hook
       #
-      # Increments and sets the `@retry_attempt` count.
+      # Increments `@retry_attempt` count and updates the "retry_key" expiration
+      # time (if applicable)
       #
       # @api private
       def before_perform_retry(*args)
@@ -357,10 +377,15 @@ module Resque
 
         # store number of retry attempts.
         retry_key = redis_retry_key(*args)
-        Resque.redis.setnx(retry_key, -1)             # default to -1 if not set.
-        @retry_attempt = Resque.redis.incr(retry_key) # increment by 1.
+        Resque.redis.setnx(retry_key, -1)
+        @retry_attempt = Resque.redis.incr(retry_key)
         log_message "attempt: #{@retry_attempt} set in Redis", args
-        Resque.redis.expire(retry_key, @retry_delay.to_i + expire_retry_key_after.to_i) if expire_retry_key_after
+
+        # set/update the "retry_key" expiration
+        if expire_retry_key_after
+          log_message "updating expiration for retry key: #{retry_key}", args
+          Resque.redis.expire(retry_key, retry_delay + expire_retry_key_after)
+        end
       end
 
       # Resque after_perform hook

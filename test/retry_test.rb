@@ -55,12 +55,23 @@ class RetryTest < MiniTest::Unit::TestCase
     assert_equal test_args, job['args']
   end
 
-  def test_job_args_may_be_modified
-    Resque.enqueue(RetryWithModifiedArgsJob, 'foo', 'bar')
+  def test_job_args_can_be_modified_by_overriding_args_for_retry
+    Resque.enqueue(DeprecatedRetryWithModifiedArgsJob)
+    DeprecatedRetryWithModifiedArgsJob.expects(:warn)
+    DeprecatedRetryWithModifiedArgsJob.expects(:args_for_retry)
     perform_next_job(@worker)
+  end
 
-    assert job = Resque.pop(:testing)
-    assert_equal ['foobar', 'barbar'], job['args']
+  def test_job_args_can_be_modified_by_overriding_retry_args
+    Resque.enqueue(RetryWithModifiedArgsJob)
+    RetryWithModifiedArgsJob.expects(:retry_args)
+    perform_next_job(@worker)
+  end
+
+  def test_job_args_can_be_modified_by_overriding_retry_args_for_exception
+    Resque.enqueue(RetryWithExceptionBasedArgsJob)
+    RetryWithExceptionBasedArgsJob.expects(:retry_args_for_exception)
+    perform_next_job(@worker)
   end
 
   def test_retry_never_give_up
@@ -287,11 +298,14 @@ class RetryTest < MiniTest::Unit::TestCase
   end
 
   def test_expire_key_setting_on_the_fly
-    Resque.redis.expects(:expire).with("resque-retry:FailFiveTimesWithCustomExpiryJob", 100)
-    .then.with("resque-retry:FailFiveTimesWithCustomExpiryJob", 101)
-    .then.with("resque-retry:FailFiveTimesWithCustomExpiryJob", 102)
-    .then.with("resque-retry:FailFiveTimesWithCustomExpiryJob", 103)
-    .then.with("resque-retry:FailFiveTimesWithCustomExpiryJob", 104)
+    retry_key = 'resque-retry:FailFiveTimesWithCustomExpiryJob'
+
+    Resque.redis.expects(:expire).
+      with(retry_key, 100).then.
+      with(retry_key, 101).then.
+      with(retry_key, 102).then.
+      with(retry_key, 103).then.
+      with(retry_key, 104)
 
     Resque.enqueue(FailFiveTimesWithCustomExpiryJob)
     5.times do

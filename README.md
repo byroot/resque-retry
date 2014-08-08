@@ -1,7 +1,7 @@
 resque-retry
 ============
 
-A [Resque][rq] plugin. Requires Resque ~> 1.25 & [resque-scheduler][rqs] ~> 2.5.
+A [Resque][rq] plugin. Requires Resque ~> 1.25 & [resque-scheduler][rqs] ~> 3.0.
 
 resque-retry provides retry, delay and exponential backoff support for
 resque jobs.
@@ -28,7 +28,7 @@ If you're using [Bundler][bundler] to manage your dependencies, you should add `
 Add this to your `Rakefile`:
 ```ruby
 require 'resque/tasks'
-require 'resque_scheduler/tasks'
+require 'resque/scheduler/tasks'
 ```
 
 The delay between retry attempts is provided by [resque-scheduler][rqs].
@@ -332,7 +332,7 @@ job should retry.
 
 ### Retry Arguments
 
-You may override `args_for_retry`, which is passed the current
+You may override `retry_args`, which is passed the current
 job arguments, to modify the arguments for the next retry attempt.
 ```ruby
 class DeliverViaSMSC
@@ -340,7 +340,7 @@ class DeliverViaSMSC
   @queue = :mt_smsc_messages
 
   # retry using the emergency SMSC.
-  def self.args_for_retry(smsc_id, mt_message)
+  def self.retry_args(smsc_id, mt_message)
     [999, mt_message]
   end
 
@@ -350,6 +350,25 @@ class DeliverViaSMSC
 end
 ```
 
+Alternatively, if you require finer control of the args based on the
+exception thrown, you may override `retry_args_for_exception`, which is passed
+the exception and the current job arguments, to modify the arguments for the
+next retry attempt.
+```ruby
+class DeliverViaSMSC
+  extend Resque::Plugins::Retry
+  @queue = :mt_smsc_messages
+
+  # retry using the emergency SMSC.
+  def self.retry_args_for_exception(exception, smsc_id, mt_message)
+    [999, mt_message + exception.message]
+  end
+
+  self.perform(smsc_id, mt_message)
+    heavy_lifting
+  end
+end
+```
 ### Job Retry Identifier/Key
 
 The retry attempt is incremented and stored in a Redis key. The key is
